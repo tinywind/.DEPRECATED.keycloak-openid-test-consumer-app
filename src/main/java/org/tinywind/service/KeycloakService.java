@@ -1,8 +1,9 @@
 package org.tinywind.service;
 
-import com.fasterxml.jackson.databind.MapperFeature;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.PropertyNamingStrategy;
+import tools.jackson.databind.MapperFeature;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.PropertyNamingStrategies;
+import tools.jackson.databind.json.JsonMapper;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.springframework.http.HttpEntity;
@@ -16,6 +17,7 @@ import org.tinywind.model.IdToken;
 import org.tinywind.model.KeycloakToken;
 
 import java.io.IOException;
+import java.net.URI;
 import java.util.Base64;
 import java.util.Map;
 
@@ -40,7 +42,12 @@ public class KeycloakService {
 
     static {
         SERVICE_DOMAIN = System.getProperty("service.domain");
-        KEYCLOAK_DOMAIN = System.getProperty("keycloak.domain") + "/realms/";
+        URI provider = URI.create(System.getProperty("keycloak.domain"));
+        if (!"https".equalsIgnoreCase(provider.getScheme()) || provider.getHost() == null
+                || provider.getUserInfo() != null || provider.getQuery() != null || provider.getFragment() != null) {
+            throw new IllegalArgumentException("keycloak.domain must be an HTTPS URL without credentials, query or fragment");
+        }
+        KEYCLOAK_DOMAIN = provider.toString().replaceAll("/+$", "") + "/realms/";
         KEYCLOAK_REALM = System.getProperty("keycloak.realm");
         KEYCLOAK_CLIENT_ID = System.getProperty("keycloak.client.id");
         KEYCLOAK_CLIENT_SECRET = System.getProperty("keycloak.client.secret");
@@ -62,9 +69,10 @@ public class KeycloakService {
         RestTemplate restTemplate = new RestTemplate();
         String response = restTemplate.postForObject(KEYCLOAK_TOKEN_URL, parameters, String.class);
 
-        ObjectMapper mapper = new ObjectMapper();
-        mapper.configure(MapperFeature.ACCEPT_CASE_INSENSITIVE_PROPERTIES, false);
-        mapper.setPropertyNamingStrategy(PropertyNamingStrategy.SNAKE_CASE);
+        ObjectMapper mapper = JsonMapper.builder()
+                .configure(MapperFeature.ACCEPT_CASE_INSENSITIVE_PROPERTIES, false)
+                .propertyNamingStrategy(PropertyNamingStrategies.SNAKE_CASE)
+                .build();
         KeycloakToken token = mapper.readValue(response, KeycloakToken.class);
 
         for (String s : token.getIdToken().split("[.]")) {

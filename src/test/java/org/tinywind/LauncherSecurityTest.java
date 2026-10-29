@@ -2,9 +2,9 @@ package org.tinywind;
 
 import com.sun.net.httpserver.HttpsConfigurator;
 import com.sun.net.httpserver.HttpsServer;
-import org.junit.AfterClass;
-import org.junit.BeforeClass;
-import org.junit.Test;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
 import org.springframework.boot.SpringApplication;
 import org.springframework.context.ConfigurableApplicationContext;
 import org.springframework.web.client.ResourceAccessException;
@@ -31,10 +31,11 @@ import java.util.Base64;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-import static org.junit.Assert.*;
+import static org.junit.jupiter.api.Assertions.*;
 
 public class LauncherSecurityTest {
     private static final AtomicInteger providerRequests = new AtomicInteger();
@@ -46,7 +47,7 @@ public class LauncherSecurityTest {
     private static ConfigurableApplicationContext application;
     private static String base;
 
-    @BeforeClass
+    @BeforeAll
     public static void startIsolatedServers() throws Exception {
         Path temporary = Files.createTempDirectory(Paths.get(System.getProperty("java.io.tmpdir")), "keycloak-tls-");
         KeyStore trustedStore = certificate(temporary.resolve("trusted.p12"));
@@ -71,7 +72,7 @@ public class LauncherSecurityTest {
         base = "http://127.0.0.1:" + application.getEnvironment().getProperty("local.server.port");
     }
 
-    @AfterClass
+    @AfterAll
     public static void stopIsolatedServers() {
         if (application != null) application.close();
         if (provider != null) provider.stop(0);
@@ -79,6 +80,25 @@ public class LauncherSecurityTest {
         HttpsURLConnection.setDefaultSSLSocketFactory(originalFactory);
         HttpsURLConnection.setDefaultHostnameVerifier(originalVerifier);
         for (String key : new String[]{"service.domain", "keycloak.domain", "keycloak.realm", "keycloak.client.id", "keycloak.client.secret"}) System.clearProperty(key);
+    }
+
+    @Test
+    public void httpProviderIsRejectedAtStartup() throws Exception {
+        Path output = Files.createTempFile(Paths.get(System.getProperty("java.io.tmpdir")), "http-provider-", ".log");
+        Process process = new ProcessBuilder(Paths.get(System.getProperty("java.home"), "bin", "java").toString(),
+                "-Djava.io.tmpdir=" + System.getProperty("java.io.tmpdir"),
+                "-Dservice.domain=http://127.0.0.1:8080", "-Dkeycloak.domain=http://127.0.0.1:1",
+                "-Dkeycloak.realm=fixture", "-Dkeycloak.client.id=fixture-client", "-Dkeycloak.client.secret=fixture-only",
+                "-cp", System.getProperty("surefire.test.class.path"), Launcher.class.getName(),
+                "--spring.main.web-application-type=none").redirectErrorStream(true).redirectOutput(output.toFile()).start();
+        try {
+            assertTrue(process.waitFor(30, TimeUnit.SECONDS), "configuration probe did not exit");
+            String log = new String(Files.readAllBytes(output), StandardCharsets.UTF_8);
+            assertNotEquals(0, process.exitValue(), log);
+            assertTrue(log.contains("keycloak.domain must be an HTTPS URL"), log);
+        } finally {
+            if (process.isAlive()) process.destroyForcibly().waitFor();
+        }
     }
 
     @Test
@@ -123,7 +143,7 @@ public class LauncherSecurityTest {
         Response page = request("/", null);
         String callback = "/login?code=fixture-code&state=" + state(page);
         Response loggedIn = request(callback, page.cookie);
-        assertEquals(loggedIn.body, 200, loggedIn.status);
+        assertEquals(200, loggedIn.status, loggedIn.body);
         assertTrue(loggedIn.body.contains("fixture-user"));
         int before = providerRequests.get();
         assertEquals(400, request(callback, page.cookie).status);
@@ -139,9 +159,9 @@ public class LauncherSecurityTest {
     }
 
     private static String state(Response page) {
-        assertEquals(page.body, 200, page.status);
+        assertEquals(200, page.status, page.body);
         Matcher matcher = Pattern.compile("[?&](?:amp;)?state=([^&\"'<>]+)").matcher(page.body);
-        assertTrue(page.body, matcher.find());
+        assertTrue(matcher.find(), page.body);
         return matcher.group(1);
     }
 
@@ -203,7 +223,7 @@ public class LauncherSecurityTest {
                 "-validity", "1", "-dname", "CN=localhost", "-ext", "SAN=dns:localhost", "-noprompt")
                 .redirectErrorStream(true).start();
         byte[] output = read(process.getInputStream());
-        assertEquals(new String(output, StandardCharsets.UTF_8), 0, process.waitFor());
+        assertEquals(0, process.waitFor(), new String(output, StandardCharsets.UTF_8));
         KeyStore store = KeyStore.getInstance("PKCS12");
         try (InputStream stream = Files.newInputStream(path)) { store.load(stream, "fixture-only".toCharArray()); }
         return store;

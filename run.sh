@@ -3,7 +3,7 @@
 mvn compile exec:java \ 
         -Dfile.encoding=utf-8 \
         -Dservice.domain=http://localhost:8000 \
-        -Dkeycloak.domain=http://{keycloak ip}/auth \
+        -Dkeycloak.domain=https://{keycloak hostname}/auth \
         -Dkeycloak.realm={realm} \
         -Dkeycloak.client.id={client id} \
         -Dkeycloak.client.secret={client secret} \
